@@ -105,11 +105,9 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
         """正确的弹塑性矩阵构造"""
         # 获取弹性矩阵
         D_e = material.elastic_matrix()  # (..., 3, 3)
-        print(n.shape)
         # 计算分母项 H = n:D_e:n (标量)
         H = bm.einsum('...i,...ij,...j->...ij', n, D_e, n)
-        print(H.shape)
-        
+
         # 计算塑性修正项
         numerator = bm.einsum('...i,...j->...ij', 
                             bm.einsum('...ik,...k', D_e, n),
