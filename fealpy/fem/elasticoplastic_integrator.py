@@ -13,51 +13,113 @@ from .integrator import (
 )
 from fealpy.fem.utils import SymbolicIntegration
 from fealpy.fem.linear_elastic_integrator import LinearElasticIntegrator
+from fealpy.fem.linear_form import LinearForm
 
 class TransitionElasticIntegrator(LinearElasticIntegrator):
-    def __init__(self, D_ep, material, q, method=None):
+    def __init__(self, D_ep, space, material, q, method=None):
         # 传递 method 参数并调用父类构造函数
         super().__init__(material, q, method=method)
         self.D_ep = D_ep  # 弹塑性材料矩阵
+        self.space = space  # 函数空间
 
-    def assembly(self, space, mesh, cellidx):
-        # 获取单元信息
-        cell = mesh.entity('cell', cellidx)
-        NC = len(cellidx)
-        gphi = space.grad_basis(bcs, cellidx=cellidx)  # (NC, NQ, ldof, GD)
+    def compute_internal_force(self, uh, plastic_strain):
+        """计算考虑塑性应变的内部力"""
+        space = self.space
+        mesh = space.mesh
+        NC = mesh.number_of_cells()
+        NQ = self.D_ep.shape[1]
+
+        # 获取单元局部位移
+        cell2dof = space.cell_to_dof()
+        uh = bm.array(uh)  
+        tldof = space.number_of_local_dofs()
+        uh_cell = bm.zeros((NC, tldof)) # (NC, tldof)
+        for c in range(NC):
+            uh_cell[c] = uh[cell2dof[c]]
+        qf = mesh.quadrature_formula(q=space.p+3)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        # 计算应变
+        B = self.material.strain_matrix(True, gphi=space.grad_basis(bcs))
+        strain_total = bm.einsum('cqijk,ci->cqj', B, uh_cell)
+        strain_elastic = strain_total - plastic_strain
+
+        # 计算应力
+        stress = bm.einsum('cqij,cqj->cqi', self.D_ep, strain_elastic)
+
+        # 组装内部力
+        cm = mesh.entity_measure('cell')
+        F_int = bm.zeros_like(uh)
+        F_int_cell = bm.einsum('q, c, cqijk,cqj->ci', 
+                             ws, cm, B, stress) # (NC, tdof)
         
-        # 获取当前单元对应的弹塑性矩阵
-        cell_D_ep = self.D_ep[cellidx]  # (NC, NQ, N, N)
+        return F_int_cell
+
+
+    def constitutive_update(self, uh, plastic_strain_old, material,yield_stress):
+        """执行本构积分返回更新后的状态"""
+        # 计算试应变
+        space = self.space
+        mesh = space.mesh
+        qf = mesh.quadrature_formula(q=space.p+3)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        B = material.strain_matrix(True,gphi=space.grad_basis(bcs))
+        uh = bm.array(uh)  
+        tldof = space.number_of_local_dofs()
+        NC = mesh.number_of_cells() 
+        uh_cell = bm.zeros((NC, tldof)) # (NC, tldof)
+        cell2dof = space.cell_to_dof()
+        for c in range(NC):
+            uh_cell[c] = uh[cell2dof[c]]
+        strain_total = bm.einsum('cqijk,ci->cqj', B, uh_cell)
+        strain_trial = strain_total - plastic_strain_old
+        # 弹性预测
+        stress_trial = bm.einsum('cqij,cqi->cqj', material.elastic_matrix(), strain_trial)
         
-        # 使用Voigt记法的组装
+        # 屈服判断
+        s_trial = stress_trial - bm.mean(stress_trial[..., :2], axis=-1, keepdims=True)
+        sigma_eff = bm.sqrt(3/2 * bm.einsum('...i,...i', s_trial, s_trial))
+        yield_mask = sigma_eff > yield_stress
+        
+        # 塑性修正
+        if bm.any(yield_mask):
+            # 计算流动方向
+            n = s_trial / (sigma_eff[..., None] + 1e-12)
+            
+            # 计算塑性乘子
+            delta_gamma = (sigma_eff[yield_mask] - yield_stress) / (3*material.mu)
+            
+            # 更新塑性应变
+            plastic_strain_new = plastic_strain_old.copy()
+            plastic_strain_new[yield_mask] += delta_gamma[:, None] * n[yield_mask]
+            
+            # 更新弹塑性矩阵
+            D_ep = self.update_elastoplastic_matrix(material, n, sigma_eff, yield_mask)
+            
+            return True, plastic_strain_new, D_ep
+        else:
+            return True, plastic_strain_old, material.elastic_matrix()
+
+    def update_elastoplastic_matrix(self,material, n, sigma_eff, yield_mask):
+        """更新弹塑性矩阵"""
+        NN = bm.einsum('...i,...j->...ij', n, n)
+        factor = 2*material.mu
+        D_ep = material.elastic_matrix() - factor * NN
+
+        
+        return bm.where(yield_mask[..., None, None], D_ep, material.elastic_matrix())
+            
+
+    def assembly(self, space: _FS) -> TensorLike:
+        '''组装切线刚度矩阵'''
         mesh = getattr(space, 'mesh', None)
+        D_ep = self.D_ep
         cm, ws, detJ, D, B = self.fetch_voigt_assembly(space)
         
         if isinstance(mesh, TensorMesh):
-            KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
+            KK = bm.einsum('c, cq, cqki, cqkl, cqlj -> cij',
                             ws, detJ, B, D_ep, B)
         else:
-                KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij',
-                                ws, cm, B, D_ep, B)
+            KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij',
+                            ws, cm, B, D_ep, B)
         
-        return K_cell.sum(axis=1)  # (NC, tdof, tdof)
-        
-    @assemblymethod('standard')
-    def assembly_standard(self, space, mesh, cellidx):
-        # 获取单元信息
-        cell = mesh.entity('cell', cellidx)
-        NC = len(cellidx)
-        gphi = space.grad_basis(bcs, cellidx=cellidx)  # (NC, NQ, ldof, GD)
-
-        # 获取当前单元对应的弹塑性矩阵
-        cell_D_ep = self.D_ep[cellidx]  # (NC, NQ, N, N)
-
-        #使用标准的线性弹性组装
-        B = self.material.strain_matrix(True, gphi)  # (NC, NQ, 3/6, tdof)
-        K_cell = bm.einsum('nqij,nqjk,nqkl,nq->nil', 
-                            B.transpose(0,1,3,2), 
-                            cell_D_ep, 
-                            B, 
-                            ws * mesh.cell_volume()[cellidx, None])
-        
-        return K_cell.sum(axis=1)  # (NC, tdof, tdof)
+        return KK # (NC, tdof, tdof)
