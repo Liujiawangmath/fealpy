@@ -42,17 +42,10 @@ class CantileverBeamData2D():
         val[fixed_mask] = [0, 0]  # 位移为零
         
         return val
-def save_results(mesh, uh, equivalent_plastic_strain, increment):
-    """保存VTK格式的结果文件
-    
-    参数:
-        mesh: 网格对象
-        uh: 位移场向量 (全局自由度)
-        equivalent_plastic_strain: 等效塑性应变场 (NC, NQ)
-        increment: 当前增量步编号
-    """
+def save_results(mesh, uh, equivalent_plastic_strain, step):
+    """保存VTK格式的结果文件，step从1开始计数"""
     # 转换位移场为节点数据
-    displacement = uh.reshape(-1, 2)  # 假设二维问题
+    displacement = uh.reshape(-1, 2)
     
     # 计算等效塑性应变的单元平均
     eps_p_mean = equivalent_plastic_strain.mean(axis=1)
@@ -62,15 +55,13 @@ def save_results(mesh, uh, equivalent_plastic_strain, increment):
     mesh.celldata['equivalent_plastic_strain'] = eps_p_mean
     
     # 设置文件名
-    output_path = f"./results/step_{increment:03d}.vtu"
-    
-    # 确保结果目录存在
-    import os
-    os.makedirs("./results", exist_ok=True)
+    output_path = f"./results/step_{step:03d}.vtu"
     
     # 输出VTK文件
     mesh.to_vtk(fname=output_path)
-    print(f"Saved results to {output_path}")   
+    print(f"Saved results to {output_path}")
+
+
 parser = argparse.ArgumentParser(description="Solve linear elasticity problems in arbitrary order Lagrange finite element space on QuadrangleMesh.")
 parser.add_argument('--backend',
                     choices=('numpy', 'pytorch'), 
@@ -101,7 +92,7 @@ tensor_space = TensorFunctionSpace(space, shape=(-1, 2))
 gdof = space.number_of_global_dofs()
 pfcm = LinearElasticMaterial(name='E1nu0.3', 
                                             elastic_modulus=1e5, poisson_ratio=0.3, 
-                                            hypo='plane_strain', device=bm.get_device(mesh))
+                                            hypo='plane_stress', device=bm.get_device(mesh))
 qf = mesh.quadrature_formula(q=tensor_space.p+3)
 bcs, ws = qf.get_quadrature_points_and_weights()
 max_increment = 20
@@ -120,6 +111,9 @@ NQ = len(ws)
 plastic_strain = bm.zeros((NC, NQ, 3))
 equivalent_plastic_strain = bm.zeros((NC, NQ))
 D_ep_global = pfcm.elastic_matrix()
+
+import os
+os.makedirs("./results", exist_ok=True)
 # 增量加载主循环
 for increment in range(max_increment):
     load_factor = min(load_factor + delta_lambda, load_max)
@@ -182,8 +176,7 @@ for increment in range(max_increment):
         print(f"Reducing step size to {delta_lambda:.3f}")
         continue
     # 保存结果
-    if increment % 5 == 0:
-        save_results(mesh, uh, equivalent_plastic_strain, increment)
-        
+    save_results(mesh, uh, equivalent_plastic_strain, increment+1)  # 从1开始编号
+
     if load_factor >= load_max:
         break

@@ -87,16 +87,16 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
             
             # 计算塑性乘子
             delta_gamma = (sigma_eff[yield_mask] - yield_stress) / (3*material.mu)
-            
             # 更新塑性应变
             plastic_strain_new = plastic_strain_old.copy()
             plastic_strain_new[yield_mask] += delta_gamma[:, None] * n[yield_mask]
+            print(plastic_strain_new.shape)
             
             # 更新弹塑性矩阵
             D_ep = self.update_elastoplastic_matrix(material, n, sigma_eff, yield_mask)
              # 在更新D_ep后添加
             eigenvalues = bm.linalg.eigvalsh(D_ep)
-            print("Min eigenvalue:", eigenvalues.min())
+            print("Max eigenvalue:", eigenvalues.max())
             return True, plastic_strain_new, D_ep
         else:
             return True, plastic_strain_old, material.elastic_matrix()
@@ -106,8 +106,8 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
         # 获取弹性矩阵
         D_e = material.elastic_matrix()  # (..., 3, 3)
         # 计算分母项 H = n:D_e:n (标量)
-        H = bm.einsum('...i,...ij,...j->...ij', n, D_e, n)
-
+        H = bm.einsum('...i,...ij,...j->...', n, D_e, n)
+        H = H[..., None, None]
         # 计算塑性修正项
         numerator = bm.einsum('...i,...j->...ij', 
                             bm.einsum('...ik,...k', D_e, n),
