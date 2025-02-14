@@ -1,5 +1,4 @@
 from fealpy.backend import backend_manager as bm
-
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
 from fealpy.mesh import QuadrangleMesh,TriangleMesh
@@ -11,16 +10,13 @@ from fealpy.fem import LinearForm
 from fealpy.fem import DirichletBC
 from fealpy.decorator import cartesian
 from fealpy.solver import cg, spsolve
-
 from fealpy.material.elastic_material import LinearElasticMaterial
 from fealpy.material.elastico_plastic_material import PlasticMaterial
 from fealpy.fem.elasticoplastic_integrator import TransitionElasticIntegrator 
 from fealpy.sparse import COOTensor
-
 import argparse
 # 平面应变问题
 class CantileverBeamData2D():
-
     def domain(self):
         # 定义悬臂梁的几何尺寸
         return [0, 1, 0, 0.25]  # 长度为1 dm，高度为0.25 dm
@@ -28,7 +24,6 @@ class CantileverBeamData2D():
     def durtion(self):
         # 时间区间
         return [0, 1]
-
     @cartesian
     def source(self, points: TensorLike, index=None, time: float = 0.0) -> TensorLike:
         x = points[..., 0]
@@ -37,9 +32,7 @@ class CantileverBeamData2D():
         val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
         # 假设载荷随时间变化，t为当前时间步
         val[..., 1] = -1.7
-
         return val
-
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
         # 固定端边界条件（假设左端固定）
@@ -49,7 +42,6 @@ class CantileverBeamData2D():
         val[fixed_mask] = [0, 0]  # 位移为零
         
         return val
-
 def save_results(mesh, uh, equivalent_plastic_strain, increment):
     """保存VTK格式的结果文件
     
@@ -79,7 +71,6 @@ def save_results(mesh, uh, equivalent_plastic_strain, increment):
     # 输出VTK文件
     mesh.to_vtk(fname=output_path)
     print(f"Saved results to {output_path}")   
-
 parser = argparse.ArgumentParser(description="Solve linear elasticity problems in arbitrary order Lagrange finite element space on QuadrangleMesh.")
 parser.add_argument('--backend',
                     choices=('numpy', 'pytorch'), 
@@ -99,18 +90,15 @@ parser.add_argument('--ny',
                     default=20, type=int,
                     help='Initial number of grid cells in the y direction, default is 4.')
 args = parser.parse_args()
-
 bm.set_backend(args.backend)
 pde = CantileverBeamData2D()
 nx, ny = args.nx, args.ny
 extent = pde.domain()
 mesh = TriangleMesh.from_box(box=extent, nx=nx, ny=ny)
-
 p = args.degree
 space = LagrangeFESpace(mesh, p=p, ctype='C')
 tensor_space = TensorFunctionSpace(space, shape=(-1, 2))
 gdof = space.number_of_global_dofs()
-
 pfcm = LinearElasticMaterial(name='E1nu0.3', 
                                             elastic_modulus=1e5, poisson_ratio=0.3, 
                                             hypo='plane_strain', device=bm.get_device(mesh))
@@ -122,19 +110,16 @@ max_iter = 10
 load_factor = 0.0
 load_max = 1.0
 delta_lambda = 0.05
-
 # 材料参数
 E = 1e5
 nu = 0.3
 sigma_y = 50  # 屈服应力
-
 # 初始化历史变量
 NC = mesh.number_of_cells()
 NQ = len(ws)
 plastic_strain = bm.zeros((NC, NQ, 3))
 equivalent_plastic_strain = bm.zeros((NC, NQ))
 D_ep_global = pfcm.elastic_matrix()
-print(D_ep_global.shape)
 # 增量加载主循环
 for increment in range(max_increment):
     load_factor = min(load_factor + delta_lambda, load_max)
@@ -150,7 +135,6 @@ for increment in range(max_increment):
         bform = BilinearForm(tensor_space)
         bform.add_integrator(elasticintegrator)
         K = bform.assembly(format='csr')
-
     
         # 载荷计算_k
         @cartesian
@@ -159,7 +143,6 @@ for increment in range(max_increment):
         lform = LinearForm(tensor_space) 
         lform.add_integrator(VectorSourceIntegrator(loading))
         F_ext = lform.assembly()
-
         
         # 计算残差
         lform = LinearForm(tensor_space) 
@@ -184,8 +167,6 @@ for increment in range(max_increment):
         yield_stress = sigma_y
         success, plastic_strain, D_ep_global = elasticintegrator.constitutive_update(
             uh, plastic_strain, pfcm,yield_stress=yield_stress)
-        print(uh.max())
-        
         if not success:
             break
             
@@ -200,11 +181,9 @@ for increment in range(max_increment):
         delta_lambda *= 0.5
         print(f"Reducing step size to {delta_lambda:.3f}")
         continue
-
     # 保存结果
     if increment % 5 == 0:
         save_results(mesh, uh, equivalent_plastic_strain, increment)
         
     if load_factor >= load_max:
         break
-

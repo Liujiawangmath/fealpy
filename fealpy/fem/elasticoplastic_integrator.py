@@ -94,19 +94,32 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
             
             # 更新弹塑性矩阵
             D_ep = self.update_elastoplastic_matrix(material, n, sigma_eff, yield_mask)
-            
+             # 在更新D_ep后添加
+            eigenvalues = bm.linalg.eigvalsh(D_ep)
+            print("Min eigenvalue:", eigenvalues.min())
             return True, plastic_strain_new, D_ep
         else:
             return True, plastic_strain_old, material.elastic_matrix()
 
-    def update_elastoplastic_matrix(self,material, n, sigma_eff, yield_mask):
-        """更新弹塑性矩阵"""
-        NN = bm.einsum('...i,...j->...ij', n, n)
-        factor = 2*material.mu
-        D_ep = material.elastic_matrix() - factor * NN
-
+    def update_elastoplastic_matrix(self, material, n, sigma_eff, yield_mask):
+        """正确的弹塑性矩阵构造"""
+        # 获取弹性矩阵
+        D_e = material.elastic_matrix()  # (..., 3, 3)
+        print(n.shape)
+        # 计算分母项 H = n:D_e:n (标量)
+        H = bm.einsum('...i,...ij,...j->...ij', n, D_e, n)
+        print(H.shape)
         
-        return bm.where(yield_mask[..., None, None], D_ep, material.elastic_matrix())
+        # 计算塑性修正项
+        numerator = bm.einsum('...i,...j->...ij', 
+                            bm.einsum('...ik,...k', D_e, n),
+                            bm.einsum('...jk,...k', D_e, n))
+        
+        # 理想塑性时 H'=0
+        D_ep = D_e - numerator / (H + 1e-12)
+        
+        return bm.where(yield_mask[..., None, None], D_ep, D_e)
+
             
 
     def assembly(self, space: _FS) -> TensorLike:
