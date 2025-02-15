@@ -23,7 +23,7 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
         self.space = space  # 函数空间
         self.equivalent_plastic_strain = equivalent_plastic_strain  # 等效塑性应变
 
-    def compute_internal_force(self, uh, plastic_strain):
+    def compute_internal_force(self, uh, plastic_strain,index=_FS) -> TensorLike:
         """计算考虑塑性应变的内部力"""
         space = self.space
         mesh = space.mesh

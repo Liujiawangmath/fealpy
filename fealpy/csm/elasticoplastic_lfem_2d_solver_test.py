@@ -140,7 +140,7 @@ for increment in range(max_increment):
         lform = LinearForm(tensor_space) 
         lform.add_integrator(VectorSourceIntegrator(loading))
         F_ext = lform.assembly()
-        
+
         # 计算残差
         lform = LinearForm(tensor_space) 
         cell2tdof = tensor_space.cell_to_dof()
@@ -151,14 +151,15 @@ for increment in range(max_increment):
          # 初始化计数数组，用于记录每个全局自由度出现的次数
         tgdof = tensor_space.number_of_global_dofs()
         count_array = bm.zeros(tgdof, dtype=int)
-        F_vareglobal = bm.zeros(tgdof, **kwargs)
-        F_int =elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
+        F_int = bm.zeros(tgdof, **kwargs)
+        F_intcell =elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
         # 使用 np.add.at 累加到全局自由度，并统计每个自由度的出现次数
-        bm.add.at(F_vareglobal, cell2tdof, F_int)  # 累加每个单元自由度到全局自由度
+        bm.add.at(F_int, cell2tdof, F_intcell)  # 累加每个单元自由度到全局自由度
         bm.add.at(count_array, cell2tdof, 1)  # 统计每个自由度出现的次数
         # 避免重复赋值影响，除以出现次数
-        F_vareglobal = bm.divide(F_vareglobal, count_array, where=count_array != 0)#TODO 未完成很有可能是这样有问题，因为F_vareglobal是全局自由度，而count_array是局部自由度
-        R = F_ext - F_vareglobal
+        F_int = bm.divide(F_int, count_array, where=count_array != 0)#TODO 未完成很有可能是这样有问题，因为F_vareglobal是全局自由度，而count_array是局部自由度
+        R = F_ext - F_int
+        print(R.max())
         
         # 边界条件处理
         dbc = DirichletBC(space=tensor_space, 
