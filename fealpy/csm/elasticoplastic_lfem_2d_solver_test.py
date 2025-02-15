@@ -86,6 +86,8 @@ pde = CantileverBeamData2D()
 nx, ny = args.nx, args.ny
 extent = pde.domain()
 mesh = TriangleMesh.from_box(box=extent, nx=nx, ny=ny)
+node = mesh.entity('node')
+kwargs = bm.context(node)
 p = args.degree
 space = LagrangeFESpace(mesh, p=p, ctype='C')
 tensor_space = TensorFunctionSpace(space, shape=(-1, 2))
@@ -108,8 +110,8 @@ sigma_y = 50  # 屈服应力
 # 初始化历史变量
 NC = mesh.number_of_cells()
 NQ = len(ws)
-plastic_strain = bm.zeros((NC, NQ, 3))
-equivalent_plastic_strain = bm.zeros((NC, NQ))
+plastic_strain = bm.zeros((NC, NQ, 3),**kwargs)
+equivalent_plastic_strain = bm.zeros((NC, NQ),**kwargs)
 D_ep_global = pfcm.elastic_matrix()
 
 import os
