@@ -144,9 +144,21 @@ for increment in range(max_increment):
         # 计算残差
         lform = LinearForm(tensor_space) 
         cell2tdof = tensor_space.cell_to_dof()
-        lform.add_integrator(ConstIntegrator(elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain),cell2tdof))
-        F_int = lform.assembly()
-        R = F_ext - F_int
+        # TODO: 修正为考虑塑性应变的内部力计算，可能有问题，1. 未考虑应力更新 2. 未考虑等效塑性应变 3. 写成积分子的形式，放在材料里面 
+        #lform.add_integrator(ConstIntegrator(elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain),cell2tdof))
+        #F_int = lform.assembly()
+        #print(F_int.max())
+         # 初始化计数数组，用于记录每个全局自由度出现的次数
+        tgdof = tensor_space.number_of_global_dofs()
+        count_array = bm.zeros(tgdof, dtype=int)
+        F_vareglobal = bm.zeros(tgdof, **kwargs)
+        F_int =elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
+        # 使用 np.add.at 累加到全局自由度，并统计每个自由度的出现次数
+        bm.add.at(F_vareglobal, cell2tdof, F_int)  # 累加每个单元自由度到全局自由度
+        bm.add.at(count_array, cell2tdof, 1)  # 统计每个自由度出现的次数
+        # 避免重复赋值影响，除以出现次数
+        F_vareglobal = bm.divide(F_vareglobal, count_array, where=count_array != 0)#TODO 未完成很有可能是这样有问题，因为F_vareglobal是全局自由度，而count_array是局部自由度
+        R = F_ext - F_vareglobal
         
         # 边界条件处理
         dbc = DirichletBC(space=tensor_space, 
@@ -163,6 +175,7 @@ for increment in range(max_increment):
         yield_stress = sigma_y
         success, plastic_strain, D_ep_global,equivalent_plastic_strain = elasticintegrator.constitutive_update(
             uh, plastic_strain, pfcm,yield_stress=yield_stress)
+        
         if not success:
             break
             
