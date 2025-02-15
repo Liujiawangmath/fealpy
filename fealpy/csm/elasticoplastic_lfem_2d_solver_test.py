@@ -47,13 +47,13 @@ def save_results(mesh, uh, equivalent_plastic_strain, step):
     # 转换位移场为节点数据
     displacement = uh.reshape(-1, 2)
     
-    # 计算等效塑性应变的单元平均
-    eps_p_mean = equivalent_plastic_strain.mean(axis=1)
+    # 修正为等效塑性应变计算
+    peeq = bm.sqrt(2/3 * bm.einsum('...i,...i', plastic_strain, plastic_strain))
     
+            
     # 设置网格数据
     mesh.nodedata['displacement'] = displacement
-    mesh.celldata['equivalent_plastic_strain'] = eps_p_mean
-    
+    mesh.celldata['PEEQ'] = peeq.mean(axis=1)  # 单元平均
     # 设置文件名
     output_path = f"./results/step_{step:03d}.vtu"
     
@@ -127,7 +127,8 @@ for increment in range(max_increment):
     
     for iter in range(max_iter):
         # 组装系统
-        elasticintegrator= TransitionElasticIntegrator(D_ep_global, material=pfcm,space=tensor_space, q=tensor_space.p+3)
+        elasticintegrator= TransitionElasticIntegrator(D_ep_global, material=pfcm,space=tensor_space, 
+                                    q=tensor_space.p+3, equivalent_plastic_strain=equivalent_plastic_strain)
         bform = BilinearForm(tensor_space)
         bform.add_integrator(elasticintegrator)
         K = bform.assembly(format='csr')
@@ -155,13 +156,12 @@ for increment in range(max_increment):
         K, R = dbc.apply(K, R)
         
         # 求解线性系统
-        du = tensor_space.function()
-        du[:] = cg(K, R, maxiter=1000, atol=1e-14, rtol=1e-14)
+        du = cg(K, R, maxiter=1000, atol=1e-14, rtol=1e-14)
         uh += du
         
         # 本构积分更新
         yield_stress = sigma_y
-        success, plastic_strain, D_ep_global = elasticintegrator.constitutive_update(
+        success, plastic_strain, D_ep_global,equivalent_plastic_strain = elasticintegrator.constitutive_update(
             uh, plastic_strain, pfcm,yield_stress=yield_stress)
         if not success:
             break

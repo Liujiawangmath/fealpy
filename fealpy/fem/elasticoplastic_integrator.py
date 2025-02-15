@@ -16,11 +16,12 @@ from fealpy.fem.linear_elastic_integrator import LinearElasticIntegrator
 from fealpy.fem.linear_form import LinearForm
 
 class TransitionElasticIntegrator(LinearElasticIntegrator):
-    def __init__(self, D_ep, space, material, q, method=None):
+    def __init__(self, D_ep, space, material, q, equivalent_plastic_strain, method=None):
         # 传递 method 参数并调用父类构造函数
         super().__init__(material, q, method=method)
         self.D_ep = D_ep  # 弹塑性材料矩阵
         self.space = space  # 函数空间
+        self.equivalent_plastic_strain = equivalent_plastic_strain  # 等效塑性应变
 
     def compute_internal_force(self, uh, plastic_strain):
         """计算考虑塑性应变的内部力"""
@@ -28,15 +29,17 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
         mesh = space.mesh
         NC = mesh.number_of_cells()
         NQ = self.D_ep.shape[1]
+        node = mesh.entity('node')
+        kwargs = bm.context(node)
 
         # 获取单元局部位移
         cell2dof = space.cell_to_dof()
-        uh = bm.array(uh)  
+        uh = bm.array(uh,**kwargs)  
         tldof = space.number_of_local_dofs()
         uh_cell = bm.zeros((NC, tldof)) # (NC, tldof)
         for c in range(NC):
             uh_cell[c] = uh[cell2dof[c]]
-        qf = mesh.quadrature_formula(q=space.p+3)
+        qf = mesh.quadrature_formula(q=space.p+3)   
         bcs, ws = qf.get_quadrature_points_and_weights()
         # 计算应变
         B = self.material.strain_matrix(True, gphi=space.grad_basis(bcs))
@@ -48,7 +51,7 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
 
         # 组装内部力
         cm = mesh.entity_measure('cell')
-        F_int = bm.zeros_like(uh)
+        F_int = bm.zeros_like(uh, **kwargs)
         F_int_cell = bm.einsum('q, c, cqijk,cqj->ci', 
                              ws, cm, B, stress) # (NC, tdof)
         
@@ -60,13 +63,15 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
         # 计算试应变
         space = self.space
         mesh = space.mesh
+        node = mesh.entity('node')
+        kwargs = bm.context(node)
         qf = mesh.quadrature_formula(q=space.p+3)
         bcs, ws = qf.get_quadrature_points_and_weights()
         B = material.strain_matrix(True,gphi=space.grad_basis(bcs))
-        uh = bm.array(uh)  
+        uh = bm.array(uh,**kwargs)  
         tldof = space.number_of_local_dofs()
         NC = mesh.number_of_cells() 
-        uh_cell = bm.zeros((NC, tldof)) # (NC, tldof)
+        uh_cell = bm.zeros((NC, tldof),**kwargs) # (NC, tldof)
         cell2dof = space.cell_to_dof()
         for c in range(NC):
             uh_cell[c] = uh[cell2dof[c]]
@@ -87,19 +92,24 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
             
             # 计算塑性乘子
             delta_gamma = (sigma_eff[yield_mask] - yield_stress) / (3*material.mu)
+            # 计算等效塑性应变增量
+            delta_peeq = delta_gamma * bm.sqrt(2/3)
+
+            # 累积到全局变量
+            self.equivalent_plastic_strain[yield_mask] += delta_peeq
+
             # 更新塑性应变
             plastic_strain_new = plastic_strain_old.copy()
             plastic_strain_new[yield_mask] += delta_gamma[:, None] * n[yield_mask]
-            print(plastic_strain_new.shape)
             
             # 更新弹塑性矩阵
             D_ep = self.update_elastoplastic_matrix(material, n, sigma_eff, yield_mask)
              # 在更新D_ep后添加
             eigenvalues = bm.linalg.eigvalsh(D_ep)
             print("Max eigenvalue:", eigenvalues.max())
-            return True, plastic_strain_new, D_ep
+            return True, plastic_strain_new, D_ep, self.equivalent_plastic_strain
         else:
-            return True, plastic_strain_old, material.elastic_matrix()
+            return True, plastic_strain_old, material.elastic_matrix(),self.equivalent_plastic_strain
 
     def update_elastoplastic_matrix(self, material, n, sigma_eff, yield_mask):
         """正确的弹塑性矩阵构造"""
