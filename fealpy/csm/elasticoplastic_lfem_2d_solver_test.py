@@ -110,10 +110,10 @@ parser.add_argument('--degree',
                     default=1, type=int, 
                     help='Degree of the Lagrange finite element space, default is 2.')
 parser.add_argument('--nx', 
-                    default=10, type=int, 
+                    default=20, type=int, 
                     help='Initial number of grid cells in the x direction, default is 4.')
 parser.add_argument('--ny',
-                    default=10, type=int,
+                    default=20, type=int,
                     help='Initial number of grid cells in the y direction, default is 4.')
 args = parser.parse_args()
 bm.set_backend(args.backend)
