@@ -43,7 +43,7 @@ class CantileverBeamData2D():
         
         return val
 def save_results(mesh, uh, equivalent_plastic_strain, step):
-    """保存VTK格式的结果文件，step从1开始计数"""
+    """保存VTK格式的结果文件,step从1开始计数"""
     # 转换位移场为节点数据
     displacement = uh.reshape(-1, 2)
     
@@ -61,6 +61,41 @@ def save_results(mesh, uh, equivalent_plastic_strain, step):
     mesh.to_vtk(fname=output_path)
     print(f"Saved results to {output_path}")
 
+def assemble_global_internal_force(space, F_int_cell):
+    """将单元内部力组装到全局自由度上
+    
+    Args:
+        space: 有限元空间，用于获取单元-自由度映射信息
+        F_int_cell (TensorLike): 单元内部力矩阵，形状 (NC, tdof)
+        
+    Returns:
+        TensorLike: 全局内部力向量，形状 (gdof,)
+    """
+    cell2dof = space.cell_to_dof()  # 获取单元-自由度映射，形状 (NC, tdof)
+    gdof = space.number_of_global_dofs()  # 全局自由度数
+    
+    # 将索引和数据展平为一维
+    indices = cell2dof.reshape(-1)        # 形状 (NC*tdof,)
+    values = F_int_cell.reshape(-1)       # 形状 (NC*tdof,)
+    
+    # 创建二维索引 (1, NC*tdof) 以符合 COOTensor 的格式要求
+    indices_2d = indices.reshape(1, -1)  # 形状 (1, NC*tdof)
+    
+    # 创建 COO 稀疏张量
+    coo = COOTensor(
+        indices=indices_2d,
+        values=values,
+        spshape=(gdof,)  # 目标形状为一维向量
+    )
+    
+    # 使用 COOTensor 的 coalesce 方法合并重复的自由度
+    coo = coo.coalesce(accumulate=True)
+    
+    # 转换为稠密张量
+    global_force = coo.to_dense()
+    
+    return global_force
+
 
 parser = argparse.ArgumentParser(description="Solve linear elasticity problems in arbitrary order Lagrange finite element space on QuadrangleMesh.")
 parser.add_argument('--backend',
@@ -75,10 +110,10 @@ parser.add_argument('--degree',
                     default=1, type=int, 
                     help='Degree of the Lagrange finite element space, default is 2.')
 parser.add_argument('--nx', 
-                    default=20, type=int, 
+                    default=10, type=int, 
                     help='Initial number of grid cells in the x direction, default is 4.')
 parser.add_argument('--ny',
-                    default=20, type=int,
+                    default=10, type=int,
                     help='Initial number of grid cells in the y direction, default is 4.')
 args = parser.parse_args()
 bm.set_backend(args.backend)
@@ -144,22 +179,19 @@ for increment in range(max_increment):
         # 计算残差
         lform = LinearForm(tensor_space) 
         cell2tdof = tensor_space.cell_to_dof()
+        F_int_cell = elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
+        F_int = assemble_global_internal_force(tensor_space, F_int_cell)
+        '''
+        # 方法二:利用constintegrate计算内部力
         # TODO: 修正为考虑塑性应变的内部力计算，可能有问题，1. 未考虑应力更新 2. 未考虑等效塑性应变 3. 写成积分子的形式，放在材料里面 
-        #lform.add_integrator(ConstIntegrator(elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain),cell2tdof))
-        #F_int = lform.assembly()
-        #print(F_int.max())
-         # 初始化计数数组，用于记录每个全局自由度出现的次数
-        tgdof = tensor_space.number_of_global_dofs()
-        count_array = bm.zeros(tgdof, dtype=int)
-        F_int = bm.zeros(tgdof, **kwargs)
-        F_intcell =elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
-        # 使用 np.add.at 累加到全局自由度，并统计每个自由度的出现次数
-        bm.add.at(F_int, cell2tdof, F_intcell)  # 累加每个单元自由度到全局自由度
-        bm.add.at(count_array, cell2tdof, 1)  # 统计每个自由度出现的次数
-        # 避免重复赋值影响，除以出现次数
-        F_int = bm.divide(F_int, count_array, where=count_array != 0)#TODO 未完成很有可能是这样有问题，因为F_vareglobal是全局自由度，而count_array是局部自由度
+        internal_force = elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
+        print(internal_force[0])
+        lform.add_integrator(ConstIntegrator(internal_force,cell2tdof))
+        F_int = lform.assembly()
+        print(F_int[0])
+        print(F_int.max())
+        '''
         R = F_ext - F_int
-        print(R.max())
         
         # 边界条件处理
         dbc = DirichletBC(space=tensor_space, 

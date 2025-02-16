@@ -51,7 +51,6 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
 
         # 组装内部力
         cm = mesh.entity_measure('cell')
-        F_int = bm.zeros_like(uh, **kwargs)
         F_int_cell = bm.einsum('q, c, cqijk,cqj->ci', 
                              ws, cm, B, stress) # (NC, tdof)
         
@@ -103,7 +102,7 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
             plastic_strain_new[yield_mask] += delta_gamma[:, None] * n[yield_mask]
             
             # 更新弹塑性矩阵
-            D_ep = self.update_elastoplastic_matrix(material, n, sigma_eff, yield_mask)
+            D_ep = self.update_elastoplastic_matrix(material, n,  yield_mask)
              # 在更新D_ep后添加
             eigenvalues = bm.linalg.eigvalsh(D_ep)
             print("Max eigenvalue:", eigenvalues.max())
@@ -111,7 +110,7 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
         else:
             return True, plastic_strain_old, material.elastic_matrix(),self.equivalent_plastic_strain
 
-    def update_elastoplastic_matrix(self, material, n, sigma_eff, yield_mask):
+    def update_elastoplastic_matrix(self, material, n,  yield_mask):
         """正确的弹塑性矩阵构造"""
         # 获取弹性矩阵
         D_e = material.elastic_matrix()  # (..., 3, 3)
