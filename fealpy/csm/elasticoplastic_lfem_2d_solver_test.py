@@ -30,14 +30,13 @@ class CantileverBeamData2D():
         y = points[..., 1]
         
         val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
-        # 假设载荷随时间变化，t为当前时间步
         val[..., 1] = -1.7
         return val
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
         # 固定端边界条件（假设左端固定）
         x = points[..., 0]
-        fixed_mask = x < 1e-10  # 左端固定
+        fixed_mask = x < 1e-8  # 左端固定
         val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
         val[fixed_mask] = [0, 0]  # 位移为零
         
@@ -52,7 +51,9 @@ def save_results(mesh, uh, equivalent_plastic_strain, step):
     
             
     # 设置网格数据
-    mesh.nodedata['displacement'] = displacement
+     # 分别存储 u 和 v 方向的位移
+    mesh.nodedata['u'] = displacement[:, 0]  # u 方向位移
+    mesh.nodedata['v'] = displacement[:, 1]  # v 方向位移
     mesh.celldata['PEEQ'] = peeq.mean(axis=1)  # 单元平均
     # 设置文件名
     output_path = f"./results/step_{step:03d}.vtu"
@@ -62,7 +63,7 @@ def save_results(mesh, uh, equivalent_plastic_strain, step):
     print(f"Saved results to {output_path}")
 
 def assemble_global_internal_force(space, F_int_cell):
-    """将单元内部力组装到全局自由度上
+    """将单元组装到全局自由度上
     
     Args:
         space: 有限元空间，用于获取单元-自由度映射信息
@@ -175,24 +176,21 @@ for increment in range(max_increment):
         lform = LinearForm(tensor_space) 
         lform.add_integrator(VectorSourceIntegrator(loading))
         F_ext = lform.assembly()
-
+        
         # 计算残差
         lform = LinearForm(tensor_space) 
         cell2tdof = tensor_space.cell_to_dof()
+        # 方法一:利用assemble_global_internal_force计算内部力
         F_int_cell = elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
         F_int = assemble_global_internal_force(tensor_space, F_int_cell)
         '''
         # 方法二:利用constintegrate计算内部力
         # TODO: 修正为考虑塑性应变的内部力计算，可能有问题，1. 未考虑应力更新 2. 未考虑等效塑性应变 3. 写成积分子的形式，放在材料里面 
         internal_force = elasticintegrator.compute_internal_force(uh=uh,plastic_strain=plastic_strain)
-        print(internal_force[0])
         lform.add_integrator(ConstIntegrator(internal_force,cell2tdof))
         F_int = lform.assembly()
-        print(F_int[0])
-        print(F_int.max())
         '''
         R = F_ext - F_int
-        
         # 边界条件处理
         dbc = DirichletBC(space=tensor_space, 
                     gd=pde.dirichlet, 
@@ -202,6 +200,7 @@ for increment in range(max_increment):
         
         # 求解线性系统
         du = cg(K, R, maxiter=1000, atol=1e-14, rtol=1e-14)
+        print(du)
         uh += du
         
         # 本构积分更新

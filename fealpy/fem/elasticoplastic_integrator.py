@@ -55,8 +55,7 @@ class TransitionElasticIntegrator(LinearElasticIntegrator):
                              ws, cm, B, stress) # (NC, tdof)
         
         return F_int_cell
-
-
+    
     def constitutive_update(self, uh, plastic_strain_old, material,yield_stress):
         """执行本构积分返回更新后的状态"""
         # 计算试应变
