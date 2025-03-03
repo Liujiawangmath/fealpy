@@ -27,8 +27,6 @@ class ElasticoplasticIntegrator(LinearElasticIntegrator):
         """计算考虑塑性应变的内部力"""
         space = self.space
         mesh = space.mesh
-        NC = mesh.number_of_cells()
-        NQ = self.D_ep.shape[1]
         node = mesh.entity('node')
         kwargs = bm.context(node)
 
@@ -42,6 +40,7 @@ class ElasticoplasticIntegrator(LinearElasticIntegrator):
         # 计算应变
         B = self.material.strain_matrix(True, gphi=space.scalar_space.grad_basis(bcs))
         strain_total = bm.einsum('cqij,cj->cqi', B, uh_cell)
+        print("Strain_total:", strain_total)
         strain_elastic = strain_total - plastic_strain
 
         # 计算应力
@@ -85,20 +84,21 @@ class ElasticoplasticIntegrator(LinearElasticIntegrator):
         if bm.any(yield_mask):
             # 计算流动方向
             n = material.df_dsigma(stress_trial)
+            """
             fenzi = bm.einsum('...i,...ij,...j->...', n, material.elastic_matrix(), d_strain)
             fenmu = bm.einsum('...i,...ij,...j->...', n, material.elastic_matrix(), n)
             fenmu_inv = 1 / (fenmu+1e-16)
             delta_lambda = fenzi * fenmu_inv
-            '''
-            # 计算塑性乘子
-            delta_gamma = (sigma_eff[yield_mask] - yield_stress) / (3*material.mu)
-            '''
-
             # 更新塑性应变
             plastic_strain_new = plastic_strain_old.copy()
-            delta_lambda_lodf = delta_lambda[...,None]
-            plastic_strain_new[yield_mask] += delta_lambda_lodf[yield_mask] * n[yield_mask]
-            
+            plastic_strain_new[yield_mask] += delta_lambda[yield_mask,None] * n[yield_mask]
+            """
+            # 计算塑性乘子
+            delta_lambda = (sigma_eff[yield_mask] - yield_stress) / (3*material.mu)
+            # 更新塑性应变
+            plastic_strain_new = plastic_strain_old.copy()
+            plastic_strain_new[yield_mask] += delta_lambda[..., None] * n[yield_mask]
+
             # 更新弹塑性矩阵
             D_ep = self.update_elastoplastic_matrix(material, n,  yield_mask)
              # 在更新D_ep后添加

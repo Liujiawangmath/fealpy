@@ -204,7 +204,8 @@ for increment in range(max_increment):
         K, R = dbc.apply(K, R)
         
         # 求解线性系统
-        du = cg(K, R, maxiter=1000, atol=1e-14, rtol=1e-14)
+        #du = cg(K, R, maxiter=1000, atol=1e-14, rtol=1e-14)
+        du = spsolve(K, R,solver='scipy')
         uh += du
         
         # 本构积分更新
