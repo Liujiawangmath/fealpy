@@ -17,13 +17,20 @@ from fealpy.sparse import COOTensor
 import argparse
 # 平面应变问题
 class CantileverBeamData2D():
+    
+    def __init__(self, 
+                 xmin: float = 0, xmax: float = 1.0, 
+                 ymin: float = 0, ymax: float = 0.25, 
+                 T: float = 1.7):
+
+        self.xmin, self.xmax = xmin, xmax
+        self.ymin, self.ymax = ymin, ymax
+        self.T = T  # 载荷大小
+        self.eps = 1e-12
     def domain(self):
         # 定义悬臂梁的几何尺寸
         return [0, 1, 0, 0.25]  # 长度为1 dm，高度为0.25 dm
     
-    def durtion(self):
-        # 时间区间
-        return [0, 1]
     @cartesian
     def source(self, points: TensorLike, index=None, time: float = 0.0) -> TensorLike:
         x = points[..., 0]
@@ -32,6 +39,7 @@ class CantileverBeamData2D():
         val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
         val[..., 1] = -1.7
         return val
+    
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
         # 固定端边界条件（假设左端固定）
@@ -41,6 +49,25 @@ class CantileverBeamData2D():
         val[fixed_mask] = [0, 0]  # 位移为零
         
         return val
+    '''
+    @cartesian
+    def source(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+
+        x = points[..., 0]
+        y = points[..., 1]
+
+        # 载荷施加在上边界的中点处
+        coord = (
+            (bm.abs(y - domain[3]) < self.eps)   # 上边界
+        )
+
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val[coord, 1] = -self.T  # 施加单位力 T
+
+        return val
+    '''
 def save_results(mesh, uh, equivalent_plastic_strain, step):
     """保存VTK格式的结果文件,step从1开始计数"""
     # 转换位移场为节点数据
