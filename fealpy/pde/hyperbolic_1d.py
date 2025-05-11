@@ -1,4 +1,4 @@
-import numpy as np
+from fealpy.backend import backend_manager as bm
 from fealpy.decorator import cartesian
 class Hyperbolic1dPDEData:
     def __init__(self, D = (0, 2), T = (0, 4)):
@@ -27,7 +27,7 @@ class Hyperbolic1dPDEData:
         @param[in] t float, 时间点 
         @return 真解函数值
         """
-        val = np.zeros_like(p)
+        val = bm.zeros_like(p)
         flag1 = p <= t
         flag2 = p > t+1
         flag3 = ~flag1 & ~flag2
@@ -42,8 +42,8 @@ class Hyperbolic1dPDEData:
         @param[in] p numpy.ndarray, 空间点
         @return 初始解函数值
         """
-        val = np.zeros_like(p)
-        val = np.abs(p-1)
+        val = bm.zeros_like(p)
+        val = bm.abs(p-1)
         return val
     @cartesian    
     def dirichlet(self, p, t):
@@ -52,7 +52,7 @@ class Hyperbolic1dPDEData:
         @param[in] p numpy.ndarray, 空间点
         @param[in] t float, 时间点 
         """
-        return np.ones(p.shape)
+        return bm.ones(p.shape)
     @cartesian    
     def is_dirichlet_boundary(self, p):
         """
@@ -60,6 +60,6 @@ class Hyperbolic1dPDEData:
         @param[in] p numpy.ndarray, 空间点
         @return bool, 如果 p 在 Dirichlet 边界上则返回 True, 否则返回 False
         """
-        return np.isclose(p, self._domain[0])
+        return bm.isclose(p, self._domain[0])
     def a(self):
         return 1
