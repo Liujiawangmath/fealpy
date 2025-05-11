@@ -4,7 +4,7 @@ from fealpy.mesh import UniformMesh
 from fealpy.fdm import DirichletBC
 from fealpy.solver import spsolve
 import matplotlib.pyplot as plt
-from fealpy.pde.hyperbolic_2d import Hyperbolic2dPDEData
+#from fealpy.pde.hyperbolic_2d import Hyperbolic2dPDEData
 from fealpy.pde.hyperbolic_2d_sympy import Hyperbolic2dData
 
 domain = [0, 1, 0, 1]
@@ -12,11 +12,13 @@ extent = [0, 20, 0, 20]
 mesh = UniformMesh(domain,extent)
 duration = [0,1]
 #pde = Hyperbolic2dPDEData()
-pde = Hyperbolic2dData("sin(pi*x)*sin(pi*y)*cos(pi*t)", a=1.0)
+pde = Hyperbolic2dData("sin(pi*x)*sin(pi*y)*cos(pi*t)", a=-1.0)
 nt =400
 tau = (duration[1] - duration[0]) / nt
 
 uh0 = mesh.interpolate(pde.init_solution)
+print(uh0.shape)
+exit 
 a = pde.a
 H0 = HyperbolicOperator(mesh,tau,a, method='explicity_upwind_viscous')
 em = bm.zeros((3, 1), dtype=bm.float64)
@@ -31,7 +33,8 @@ def hyperbolic_windward(n):
     if n == 0:
         return uh0, t
     else:
-        A = H0.explicity_upwind_viscous_assembly()
+        A = H0.assembly()
+        print(A.toarray())
         source  = lambda p: pde.source(p, t+tau)
         f = mesh.interpolate(source)
         uh0[:]=A@uh0 + tau*f
